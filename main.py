@@ -53,75 +53,67 @@ class TrainingWorker(QRunnable):
         self.model_name = model_name
         self.epochs = epochs
         self.signals = WorkerSignals()
+        self.img_size = (180, 180)
+        self.batch_size = 32
+
+    def _check_data(self):
+        good_count = len(list(Path("good").glob("*")))
+        bad_count = len(list(Path("bad").glob("*")))
+        if good_count == 0 or bad_count == 0:
+            raise Exception(f"Dados insuficientes! Boas: {good_count}, Ruins: {bad_count}. Adicione imagens em ambas.")
+
+    def _get_datasets(self, tf):
+        base_dir = Path(".")
+        ds_params = {
+            "directory": base_dir,
+            "validation_split": 0.2,
+            "seed": 123,
+            "image_size": self.img_size,
+            "batch_size": self.batch_size,
+            "class_names": ['bad', 'good']
+        }
+        
+        train_ds = tf.keras.utils.image_dataset_from_directory(subset="training", **ds_params)
+        val_ds = tf.keras.utils.image_dataset_from_directory(subset="validation", **ds_params)
+        
+        AUTOTUNE = tf.data.AUTOTUNE
+        train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+        val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
+        
+        return train_ds, val_ds
+
+    def _build_model(self, layers, models):
+        model = models.Sequential([
+            layers.Rescaling(1./255, input_shape=(*self.img_size, 3)),
+            layers.Conv2D(16, 3, padding='same', activation='relu'),
+            layers.MaxPooling2D(),
+            layers.Conv2D(32, 3, padding='same', activation='relu'),
+            layers.MaxPooling2D(),
+            layers.Conv2D(64, 3, padding='same', activation='relu'),
+            layers.MaxPooling2D(),
+            layers.Flatten(),
+            layers.Dense(128, activation='relu'),
+            layers.Dense(1, activation='sigmoid')
+        ])
+        
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+        return model
 
     @Slot()
     def run(self):
         try:
-            # Importação Lazy para não pesar na inicialização da GUI
             self.signals.train_progress.emit(5, "Carregando TensorFlow...")
             import tensorflow as tf
             from tensorflow.keras import layers, models
 
-            base_dir = Path(".")
-            img_height, img_width = 180, 180
-            batch_size = 32
-
-            # Verificar dados
-            good_count = len(list(Path("good").glob("*")))
-            bad_count = len(list(Path("bad").glob("*")))
+            self._check_data()
             
-            if good_count == 0 or bad_count == 0:
-                raise Exception(f"Dados insuficientes! Boas: {good_count}, Ruins: {bad_count}. Adicione imagens em ambas.")
-
-            self.signals.train_progress.emit(10, "Criando Datasets...")
-            
-            # Criar Dataset
-            train_ds = tf.keras.utils.image_dataset_from_directory(
-                base_dir,
-                validation_split=0.2,
-                subset="training",
-                seed=123,
-                image_size=(img_height, img_width),
-                batch_size=batch_size,
-                class_names=['bad', 'good'] # Ordem alfabética é padrão do TF, mas forçamos para garantir
-            )
-            
-            val_ds = tf.keras.utils.image_dataset_from_directory(
-                base_dir,
-                validation_split=0.2,
-                subset="validation",
-                seed=123,
-                image_size=(img_height, img_width),
-                batch_size=batch_size,
-                class_names=['bad', 'good']
-            )
-
-            # Otimização de I/O
-            AUTOTUNE = tf.data.AUTOTUNE
-            train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
-            val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
+            self.signals.train_progress.emit(10, "Preparando Datasets...")
+            train_ds, val_ds = self._get_datasets(tf)
 
             self.signals.train_progress.emit(20, "Construindo Modelo...")
+            model = self._build_model(layers, models)
 
-            # Arquitetura CNN Simples e Eficiente
-            model = models.Sequential([
-                layers.Rescaling(1./255, input_shape=(img_height, img_width, 3)),
-                layers.Conv2D(16, 3, padding='same', activation='relu'),
-                layers.MaxPooling2D(),
-                layers.Conv2D(32, 3, padding='same', activation='relu'),
-                layers.MaxPooling2D(),
-                layers.Conv2D(64, 3, padding='same', activation='relu'),
-                layers.MaxPooling2D(),
-                layers.Flatten(),
-                layers.Dense(128, activation='relu'),
-                layers.Dense(1, activation='sigmoid') # Saída binária (0=bad, 1=good)
-            ])
-
-            model.compile(optimizer='adam',
-                          loss='binary_crossentropy',
-                          metrics=['accuracy'])
-
-            # Callback Customizado para atualizar GUI
             class ProgressCallback(tf.keras.callbacks.Callback):
                 def __init__(self, signals, total_epochs):
                     self.signals = signals
@@ -133,8 +125,7 @@ class TrainingWorker(QRunnable):
                     self.signals.train_progress.emit(percent, f"Época {epoch+1}/{self.total_epochs} - Acc: {acc:.2f}")
 
             self.signals.train_progress.emit(25, "Iniciando Treinamento...")
-            
-            history = model.fit(
+            model.fit(
                 train_ds,
                 validation_data=val_ds,
                 epochs=self.epochs,
@@ -310,7 +301,7 @@ class ImageTrainerApp(QMainWindow):
         header.addWidget(self.btn_import)
         
         # Botão TREINAR (Destaque)
-        self.btn_train = QPushButton("⚡ TREINAR MODELO")
+        self.btn_train = QPushButton("TREINAR MODELO")
         self.btn_train.setObjectName("BtnTrain")
         self.btn_train.setCursor(Qt.PointingHandCursor)
         self.btn_train.clicked.connect(self.start_training_dialog)
