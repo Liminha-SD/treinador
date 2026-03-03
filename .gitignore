@@ -54,3 +54,4 @@ Desktop.ini
 # Projeto específico
 bad/
 good/
+*.keras
