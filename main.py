@@ -6,10 +6,10 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QScrollArea, QPushButton, QFileDialog, QSlider, QLabel, QFrame,
     QMessageBox, QGridLayout, QMenu, QStatusBar, QInputDialog, QProgressBar,
-    QLineEdit
+    QLineEdit, QRubberBand
 )
 from PySide6.QtGui import QPixmap, QImage, QColor, QFont, QAction, QDragEnterEvent, QDropEvent
-from PySide6.QtCore import Qt, Signal, QRunnable, QThreadPool, Slot, QObject, QSize
+from PySide6.QtCore import Qt, Signal, QRunnable, QThreadPool, Slot, QObject, QSize, QPoint, QRect, QEvent
 
 # --- Configurações de Performance e Estética ---
 MAX_THREADS = os.cpu_count() or 4
@@ -154,6 +154,8 @@ class ImageWidget(QFrame):
         self.file_path = str(file_path)
         self.selected = False
         self.current_size = size
+        self.mouse_pressed_pos = None
+        self.full_pixmap = None
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -174,23 +176,45 @@ class ImageWidget(QFrame):
         self.setCursor(Qt.PointingHandCursor)
 
     def set_pixmap(self, pixmap):
-        scaled = pixmap.scaled(self.current_size, self.current_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.image_label.setPixmap(scaled)
-        self.image_label.setStyleSheet("background: transparent;")
+        self.full_pixmap = pixmap
+        self.update_display_pixmap()
+
+    def update_display_pixmap(self):
+        if self.full_pixmap:
+            scaled = self.full_pixmap.scaled(
+                self.current_size, self.current_size, 
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.image_label.setPixmap(scaled)
+            self.image_label.setStyleSheet("background: transparent;")
 
     def update_size(self, size):
         self.current_size = size
         self.setFixedSize(size + 12, size + 45)
-        if self.image_label.pixmap():
-            self.set_pixmap(self.image_label.pixmap())
+        self.update_display_pixmap()
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.selected = not self.selected
+    def set_selected(self, selected, emit_signal=True):
+        if self.selected != selected:
+            self.selected = selected
             self.setProperty("selected", self.selected)
             self.style().unpolish(self)
             self.style().polish(self)
-            self.clicked.emit(self.file_path, self.selected)
+            if emit_signal:
+                self.clicked.emit(self.file_path, self.selected)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.mouse_pressed_pos = event.position().toPoint()
+            # Allow event to propagate to container for rubber band
+            event.ignore()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.mouse_pressed_pos:
+            diff = event.position().toPoint() - self.mouse_pressed_pos
+            if diff.manhattanLength() < 10:
+                self.set_selected(not self.selected)
+            self.mouse_pressed_pos = None
+            event.accept()
 
 class ImageTrainerApp(QMainWindow):
     def __init__(self):
@@ -328,12 +352,19 @@ class ImageTrainerApp(QMainWindow):
         self.scroll.setWidgetResizable(True)
         self.container = QWidget()
         self.container.setObjectName("GridContainer")
-        self.grid = QGridLayout(self.container)
+        self.container.installEventFilter(self)
+        
+        self.grid = QGridLayout()
+        self.container.setLayout(self.grid)
+        
         self.grid.setSpacing(18)
         self.grid.setContentsMargins(0, 0, 15, 0)
         self.grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
+
+        self.rubber_band = QRubberBand(QRubberBand.Rectangle, self.container)
+        self.origin = QPoint()
 
         # --- FOOTER ---
         footer = QHBoxLayout()
@@ -459,7 +490,8 @@ class ImageTrainerApp(QMainWindow):
                 w = ImageWidget(p, self.current_image_size)
                 w.clicked.connect(self.on_click)
                 self.image_widgets[p] = w
-                worker = ImageLoaderWorker(p, 150)
+                # Load at 800px to cover max zoom (400px) and high-DPI
+                worker = ImageLoaderWorker(p, 400)
                 worker.signals.finished.connect(self.on_load_finished)
                 self.thread_pool.start(worker)
         self.reorganize_grid()
@@ -534,6 +566,29 @@ class ImageTrainerApp(QMainWindow):
             for f in Path(folder).iterdir(): 
                 if f.is_file(): f.unlink()
             self.statusBar().showMessage(f"Pasta {folder} zerada.", 2000)
+
+    def eventFilter(self, source, event):
+        if source == self.container:
+            if event.type() == QEvent.MouseButtonPress:
+                if event.button() == Qt.LeftButton:
+                    self.origin = self.container.mapFromGlobal(event.globalPosition().toPoint())
+                    self.rubber_band.setGeometry(QRect(self.origin, QSize()))
+                    self.rubber_band.show()
+            elif event.type() == QEvent.MouseMove:
+                if self.rubber_band.isVisible():
+                    curr_pos = self.container.mapFromGlobal(event.globalPosition().toPoint())
+                    self.rubber_band.setGeometry(QRect(self.origin, curr_pos).normalized())
+                    self.update_selection_from_rubber_band()
+            elif event.type() == QEvent.MouseButtonRelease:
+                if event.button() == Qt.LeftButton:
+                    self.rubber_band.hide()
+        return super().eventFilter(source, event)
+
+    def update_selection_from_rubber_band(self):
+        rect = self.rubber_band.geometry()
+        for path, widget in self.image_widgets.items():
+            is_in = rect.intersects(widget.geometry())
+            widget.set_selected(is_in)
 
 if __name__ == "__main__":
     app = QApplication([])
