@@ -13,27 +13,21 @@ echo ====================================================
 :: --- 1. Python e Ambiente Virtual ---
 set "PYTHON_VERSION=3.12.10"
 
-echo [1/5] Verificando Python %PYTHON_VERSION%...
+echo [1/5] Verificando Python !PYTHON_VERSION! via Python Manager...
 
-:: Verifica se o Python Launcher existe
-where py >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo [ERRO] Python Launcher (py) nao encontrado.
-    echo Instale o Python pelo instalador oficial da Microsoft.
-    pause
-    exit /b 1
-)
-
-:: Verifica se a versao especifica esta instalada
-py -%PYTHON_VERSION% -V >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo [1/5] Python %PYTHON_VERSION% nao encontrado. Instalando via Python Manager...
-
-    :: instala a versao usando o Python Manager
-    py install %PYTHON_VERSION%
-
-    if %ERRORLEVEL% neq 0 (
-        echo [ERRO] Falha ao instalar Python %PYTHON_VERSION%.
+:: Verifica se a versao ja esta instalada na listagem do 'py'
+py --list | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    echo [1/5] Python !PYTHON_VERSION! ja esta pronto para uso.
+) else (
+    echo [1/5] Python !PYTHON_VERSION! nao encontrado. Instalando via 'py install'...
+    
+    :: Usa o comando oficial do Python Manager para instalar
+    py install !PYTHON_VERSION!
+    
+    if !ERRORLEVEL! neq 0 (
+        echo [ERRO] Falha ao instalar via 'py install'. 
+        echo Certifique-se de que o Python Manager (oficial) esta atualizado.
         pause
         exit /b 1
     )
@@ -41,8 +35,14 @@ if %ERRORLEVEL% neq 0 (
 
 if not exist "!VENV_DIR!\Scripts\activate.bat" (
     echo [2/5] Criando ambiente virtual com Python !PYTHON_VERSION!...
-    :: Tenta criar com 'python' (que o pyenv deve ter setado) ou via launcher 'py'
-    python -m venv !VENV_DIR! || py -!PYTHON_VERSION! -m venv !VENV_DIR!
+    :: Usa o launcher para chamar a versao especifica e criar a venv
+    py -!PYTHON_VERSION! -m venv !VENV_DIR!
+    
+    if !ERRORLEVEL! neq 0 (
+        echo [ERRO] Falha ao criar ambiente virtual com a versao !PYTHON_VERSION!.
+        pause
+        exit /b 1
+    )
 ) else (
     echo [2/5] Ambiente virtual ja existe.
 )
