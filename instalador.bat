@@ -10,21 +10,43 @@ echo ====================================================
 echo   Configurando Ambiente e Compilando !APP_NAME!
 echo ====================================================
 
-:: --- 1. Ambiente Virtual ---
-if not exist "!VENV_DIR!\Scripts\activate.bat" (
-    echo [1/4] Criando ambiente virtual...
-    python -m venv !VENV_DIR!
+:: --- 1. Python e Ambiente Virtual ---
+set "PYTHON_VERSION=3.12.10"
+
+echo [1/5] Verificando Python !PYTHON_VERSION!...
+
+:: Verifica se pyenv existe
+where pyenv >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo [1/5] Usando pyenv para garantir Python !PYTHON_VERSION!...
+    pyenv install !PYTHON_VERSION! --skip-existing >nul 2>&1
+    pyenv local !PYTHON_VERSION!
 ) else (
-    echo [1/4] Ambiente virtual ja existe.
+    echo [AVISO] pyenv nao encontrado. Tentando verificar via launcher 'py'...
+    py --list | findstr /C:"!PYTHON_VERSION!" >nul
+    if %ERRORLEVEL% neq 0 (
+        echo [ERRO] Python !PYTHON_VERSION! nao encontrado.
+        echo Por favor, instale o Python !PYTHON_VERSION! ou o pyenv-win.
+        pause
+        exit /b 1
+    )
 )
 
-echo [2/4] Ativando ambiente e instalando dependencias...
+if not exist "!VENV_DIR!\Scripts\activate.bat" (
+    echo [2/5] Criando ambiente virtual com Python !PYTHON_VERSION!...
+    :: Tenta criar com 'python' (que o pyenv deve ter setado) ou via launcher 'py'
+    python -m venv !VENV_DIR! || py -!PYTHON_VERSION! -m venv !VENV_DIR!
+) else (
+    echo [2/5] Ambiente virtual ja existe.
+)
+
+echo [3/5] Ativando ambiente e instalando dependencias...
 call !VENV_DIR!\Scripts\activate.bat
 python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 
 :: --- 2. Compilacao ---
-echo [3/4] Compilando !APP_NAME!...
+echo [4/5] Compilando !APP_NAME!...
 :: --noconsole: sem janela de terminal
 :: --onefile: apenas um executavel
 :: --collect-all tensorflow: necessario para apps que usam tensorflow
@@ -32,7 +54,7 @@ pyinstaller --noconsole --onefile --collect-all tensorflow --name "!APP_NAME!" "
 
 :: --- 3. Limpeza e Finalizacao ---
 if exist "dist\!APP_NAME!.exe" (
-    echo [4/4] Finalizando: Movendo executavel e limpando arquivos inuteis...
+    echo [5/5] Finalizando: Movendo executavel e limpando arquivos inuteis...
     
     :: Move o exe para a raiz
     move /y "dist\!APP_NAME!.exe" "." >nul
