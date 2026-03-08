@@ -5,41 +5,63 @@ setlocal enabledelayedexpansion
 set "VENV_DIR=venv"
 set "APP_NAME=treinador"
 set "MAIN_FILE=main.py"
-
-echo ====================================================
-echo   Configurando Ambiente e Compilando !APP_NAME!
-echo ====================================================
-
-:: --- 1. Python e Ambiente Virtual ---
 set "PYTHON_VERSION=3.12.10"
+
+echo ====================================================
+echo   DEBUG: Iniciando script...
+echo ====================================================
+
+:: 1. Verifica se o comando 'py' existe
+where py >nul 2>&1
+if !ERRORLEVEL! neq 0 (
+    echo [ERRO] Comando 'py' nao encontrado no PATH.
+    echo Certifique-se de que o Python Launcher ou Python Manager esta instalado.
+    pause
+    exit /b 1
+)
 
 echo [1/5] Verificando Python !PYTHON_VERSION! via Python Manager...
 
-:: Verifica se a versao ja esta instalada na listagem do 'py'
-py --list | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
+:: Tenta listar as versoes instaladas. 
+:: O Python Manager oficial usa 'py --list', o Launcher antigo usa 'py -0'
+set "PY_LIST_CMD=py --list"
+!PY_LIST_CMD! >nul 2>&1
+if !ERRORLEVEL! neq 0 (
+    set "PY_LIST_CMD=py -0"
+)
+
+echo DEBUG: Usando comando '!PY_LIST_CMD!' para listagem.
+
+!PY_LIST_CMD! | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
 if !ERRORLEVEL! equ 0 (
-    echo [1/5] Python !PYTHON_VERSION! ja esta pronto para uso.
+    echo [1/5] Python !PYTHON_VERSION! ja esta instalado.
 ) else (
-    echo [1/5] Python !PYTHON_VERSION! nao encontrado. Instalando via 'py install'...
+    echo [1/5] Python !PYTHON_VERSION! nao encontrado. Tentando instalar...
     
-    :: Usa o comando oficial do Python Manager para instalar
+    :: Tenta o comando de instalacao do Python Manager
     py install !PYTHON_VERSION!
     
     if !ERRORLEVEL! neq 0 (
-        echo [ERRO] Falha ao instalar via 'py install'. 
-        echo Certifique-se de que o Python Manager (oficial) esta atualizado.
+        echo [ERRO] Falha ao instalar via 'py install !PYTHON_VERSION!'.
+        echo Verifique se voce tem o Python Manager atualizado (via Microsoft Store ou Winget).
         pause
         exit /b 1
     )
 )
 
+:: 2. Criacao da Venv
 if not exist "!VENV_DIR!\Scripts\activate.bat" (
     echo [2/5] Criando ambiente virtual com Python !PYTHON_VERSION!...
-    :: Usa o launcher para chamar a versao especifica e criar a venv
     py -!PYTHON_VERSION! -m venv !VENV_DIR!
     
     if !ERRORLEVEL! neq 0 (
-        echo [ERRO] Falha ao criar ambiente virtual com a versao !PYTHON_VERSION!.
+        echo [ERRO] Falha ao criar ambiente virtual. 
+        echo Tentando comando alternativo...
+        python -m venv !VENV_DIR!
+    )
+    
+    if not exist "!VENV_DIR!\Scripts\activate.bat" (
+        echo [ERRO] Nao foi possivel criar a venv.
         pause
         exit /b 1
     )
@@ -49,38 +71,29 @@ if not exist "!VENV_DIR!\Scripts\activate.bat" (
 
 echo [3/5] Ativando ambiente e instalando dependencias...
 call !VENV_DIR!\Scripts\activate.bat
+if !ERRORLEVEL! neq 0 (
+    echo [ERRO] Falha ao ativar a venv.
+    pause
+    exit /b 1
+)
+
 python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 
-:: --- 2. Compilacao ---
 echo [4/5] Compilando !APP_NAME!...
-:: --noconsole: sem janela de terminal
-:: --onefile: apenas um executavel
-:: --collect-all tensorflow: necessario para apps que usam tensorflow
 pyinstaller --noconsole --onefile --collect-all tensorflow --name "!APP_NAME!" "!MAIN_FILE!"
 
-:: --- 3. Limpeza e Finalizacao ---
 if exist "dist\!APP_NAME!.exe" (
-    echo [5/5] Finalizando: Movendo executavel e limpando arquivos inuteis...
-    
-    :: Move o exe para a raiz
+    echo [5/5] Finalizando: Movendo executavel...
     move /y "dist\!APP_NAME!.exe" "." >nul
-    
-    :: Remove pastas de build
     if exist "build" rmdir /s /q "build"
     if exist "dist" rmdir /s /q "dist"
-    
-    :: Remove arquivos .spec
     if exist "!APP_NAME!.spec" del /q "!APP_NAME!.spec"
-    if exist "main.spec" del /q "main.spec"
-
-    echo.
     echo ====================================================
     echo   SUCESSO !APP_NAME!.exe pronto na raiz.
     echo ====================================================
 ) else (
-    echo.
-    echo [ERRO] Falha na compilacao. Verifique as mensagens acima.
+    echo [ERRO] Falha na compilacao.
 )
 
 echo.
