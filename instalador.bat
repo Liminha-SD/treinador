@@ -13,39 +13,36 @@ echo ====================================================
 :: --- 1. Python e Ambiente Virtual ---
 set "PYTHON_VERSION=3.12.10"
 
-echo [1/5] Verificando Python !PYTHON_VERSION!...
+echo [1/5] Verificando Python %PYTHON_VERSION%...
 
-:: Verifica se o comando 'py' está disponível (Python Launcher)
+:: Verifica se o Python Launcher existe
 where py >nul 2>&1
-if %ERRORLEVEL% equ 0 (
-    echo [1/5] Usando Python Launcher para garantir Python !PYTHON_VERSION!...
-    
-    :: Verifica se a versão específica está instalada
-    py -0p | findstr /C:"!PYTHON_VERSION!" >nul
-    if %ERRORLEVEL% equ 0 (
-        echo [1/5] Versão !PYTHON_VERSION! já disponível via Python Launcher
-    ) else (
-        echo [1/5] Versão !PYTHON_VERSION! não encontrada. Instalando...
-        py -m install !PYTHON_VERSION! >nul 2>&1
-        if %ERRORLEVEL% equ 0 (
-            echo [1/5] Versão !PYTHON_VERSION! instalada com sucesso
-        ) else (
-            echo [ERRO] Falha ao instalar Python !PYTHON_VERSION!
-            pause
-            exit /b 1
-        )
-    )
-) else (
-    echo [AVISO] Python Launcher (py) nao encontrado.
-    echo Por favor, instale o Python Launcher ou verifique a variável de ambiente PATH.
+if %ERRORLEVEL% neq 0 (
+    echo [ERRO] Python Launcher (py) nao encontrado.
+    echo Instale o Python pelo instalador oficial da Microsoft.
     pause
     exit /b 1
 )
 
-:: Cria ou verifica ambiente virtual
+:: Verifica se a versao especifica esta instalada
+py -%PYTHON_VERSION% -V >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo [1/5] Python %PYTHON_VERSION% nao encontrado. Instalando via Python Manager...
+
+    :: instala a versao usando o Python Manager
+    py install %PYTHON_VERSION%
+
+    if %ERRORLEVEL% neq 0 (
+        echo [ERRO] Falha ao instalar Python %PYTHON_VERSION%.
+        pause
+        exit /b 1
+    )
+)
+
 if not exist "!VENV_DIR!\Scripts\activate.bat" (
     echo [2/5] Criando ambiente virtual com Python !PYTHON_VERSION!...
-    py -!PYTHON_VERSION! -m venv !VENV_DIR!
+    :: Tenta criar com 'python' (que o pyenv deve ter setado) ou via launcher 'py'
+    python -m venv !VENV_DIR! || py -!PYTHON_VERSION! -m venv !VENV_DIR!
 ) else (
     echo [2/5] Ambiente virtual ja existe.
 )
@@ -57,6 +54,9 @@ pip install -r requirements.txt --quiet
 
 :: --- 2. Compilacao ---
 echo [4/5] Compilando !APP_NAME!...
+:: --noconsole: sem janela de terminal
+:: --onefile: apenas um executavel
+:: --collect-all tensorflow: necessario para apps que usam tensorflow
 pyinstaller --noconsole --onefile --collect-all tensorflow --name "!APP_NAME!" "!MAIN_FILE!"
 
 :: --- 3. Limpeza e Finalizacao ---
