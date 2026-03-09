@@ -8,42 +8,52 @@ set "MAIN_FILE=main.py"
 set "PYTHON_VERSION=3.12.10"
 
 echo ====================================================
-echo   DEBUG: Iniciando script...
+echo   Configurando Ambiente via Python Manager
 echo ====================================================
 
 :: 1. Verifica se o comando 'py' existe
 where py >nul 2>&1
 if !ERRORLEVEL! neq 0 (
-    echo [ERRO] Comando 'py' nao encontrado no PATH.
-    echo Certifique-se de que o Python Launcher ou Python Manager esta instalado.
+    echo [ERRO] Comando 'py' nao encontrado. 
+    echo Instale o Python Manager oficial da Microsoft Store.
     pause
     exit /b 1
 )
 
-echo [1/5] Verificando Python !PYTHON_VERSION! via Python Manager...
+echo [1/5] Verificando Python !PYTHON_VERSION!...
 
-:: Tenta listar as versoes instaladas. 
-:: O Python Manager oficial usa 'py --list', o Launcher antigo usa 'py -0'
-set "PY_LIST_CMD=py --list"
-!PY_LIST_CMD! >nul 2>&1
-if !ERRORLEVEL! neq 0 (
-    set "PY_LIST_CMD=py -0"
+:: Tenta listar usando os tres formatos possiveis do oficial e do legado
+set "INSTALADO=nao"
+
+:: Teste 1: py list (Novo Manager)
+py list 2>nul | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
+if !ERRORLEVEL! equ 0 set "INSTALADO=sim"
+
+:: Teste 2: py --list (Variacao do Novo Manager)
+if "!INSTALADO!"=="nao" (
+    py --list 2>nul | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "INSTALADO=sim"
 )
 
-echo DEBUG: Usando comando '!PY_LIST_CMD!' para listagem.
+:: Teste 3: py -0 (Launcher Antigo)
+if "!INSTALADO!"=="nao" (
+    py -0 2>nul | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "INSTALADO=sim"
+)
 
-!PY_LIST_CMD! | findstr /C:"!PYTHON_VERSION!" >nul 2>&1
-if !ERRORLEVEL! equ 0 (
+if "!INSTALADO!"=="sim" (
     echo [1/5] Python !PYTHON_VERSION! ja esta instalado.
 ) else (
-    echo [1/5] Python !PYTHON_VERSION! nao encontrado. Tentando instalar...
+    echo [1/5] Python !PYTHON_VERSION! nao encontrado. Instalando...
+    echo Executando: py install !PYTHON_VERSION!
     
-    :: Tenta o comando de instalacao do Python Manager
     py install !PYTHON_VERSION!
     
     if !ERRORLEVEL! neq 0 (
-        echo [ERRO] Falha ao instalar via 'py install !PYTHON_VERSION!'.
-        echo Verifique se voce tem o Python Manager atualizado (via Microsoft Store ou Winget).
+        echo.
+        echo [ERRO] Falha na instalacao automatica.
+        echo Se voce usa o Python Manager oficial, tente rodar no terminal:
+        echo py install !PYTHON_VERSION!
         pause
         exit /b 1
     )
@@ -55,13 +65,7 @@ if not exist "!VENV_DIR!\Scripts\activate.bat" (
     py -!PYTHON_VERSION! -m venv !VENV_DIR!
     
     if !ERRORLEVEL! neq 0 (
-        echo [ERRO] Falha ao criar ambiente virtual. 
-        echo Tentando comando alternativo...
-        python -m venv !VENV_DIR!
-    )
-    
-    if not exist "!VENV_DIR!\Scripts\activate.bat" (
-        echo [ERRO] Nao foi possivel criar a venv.
+        echo [ERRO] Falha ao criar ambiente virtual com 'py -!PYTHON_VERSION!'.
         pause
         exit /b 1
     )
@@ -71,12 +75,6 @@ if not exist "!VENV_DIR!\Scripts\activate.bat" (
 
 echo [3/5] Ativando ambiente e instalando dependencias...
 call !VENV_DIR!\Scripts\activate.bat
-if !ERRORLEVEL! neq 0 (
-    echo [ERRO] Falha ao ativar a venv.
-    pause
-    exit /b 1
-)
-
 python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 
@@ -84,7 +82,7 @@ echo [4/5] Compilando !APP_NAME!...
 pyinstaller --noconsole --onefile --collect-all tensorflow --name "!APP_NAME!" "!MAIN_FILE!"
 
 if exist "dist\!APP_NAME!.exe" (
-    echo [5/5] Finalizando: Movendo executavel...
+    echo [5/5] Finalizando...
     move /y "dist\!APP_NAME!.exe" "." >nul
     if exist "build" rmdir /s /q "build"
     if exist "dist" rmdir /s /q "dist"
@@ -93,7 +91,7 @@ if exist "dist\!APP_NAME!.exe" (
     echo   SUCESSO !APP_NAME!.exe pronto na raiz.
     echo ====================================================
 ) else (
-    echo [ERRO] Falha na compilacao.
+    echo [ERRO] Falha na compilacao. Verifique se o PyInstaller funcionou.
 )
 
 echo.
